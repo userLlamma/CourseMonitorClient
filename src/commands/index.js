@@ -51,15 +51,29 @@ export const Commands = {
       // 更新配置
       const newConfig = { ...config, ...answers };
       
-      // 检查是否需要生成密钥对
+      // 处理密钥对 - 修改逻辑：始终尝试进行注册
+      // 如果没有密钥对，先生成一个
       if (!newConfig.keyPair) {
-        console.log('您需要生成密钥对以进行安全认证。');
+        console.log('正在生成密钥对以进行安全认证...');
         await ReporterCore.generateAndSaveKeyPair(newConfig);
       }
       
       // 保存配置
       await ConfigManager.saveConfig(newConfig);
       console.log('配置已保存');
+      
+      // 始终尝试向服务器注册密钥
+      console.log('正在向服务器注册公钥...');
+      try {
+        await ReporterCore.registerPublicKey(newConfig);
+        console.log('公钥注册成功！');
+      } catch (error) {
+        if (error.response?.data?.keyExists) {
+          console.log('服务器已有您的公钥记录。如果您更换了环境，请联系教师重置您的公钥。');
+        } else {
+          console.error('公钥注册失败:', error.message);
+        }
+      }
       
       // 提示完成报告
       if (newConfig.studentId) {
@@ -73,7 +87,7 @@ export const Commands = {
         ]);
         
         if (report) {
-            await Commands.reportOnce();
+          await Commands.reportOnce();
         }
       }
       
@@ -102,20 +116,22 @@ export const Commands = {
         authData = await ReporterCore.authenticate(config);
       } catch (authError) {
         // 处理认证错误
-        if (authError.response?.data?.requiresReregistration) {
-          console.log('教师已重置您的密钥，需要重新注册');
-          // 删除旧密钥配置
-          config.keyPair = null;
-          await ConfigManager.saveConfig(config);
-          // 生成新密钥
-          await ReporterCore.generateAndSaveKeyPair(config);
-          // 重试认证
-          authData = await ReporterCore.authenticate(config);
+        if (authError.message.includes('未在服务器上注册公钥')) {
+          console.log('您还没有向服务器注册公钥，请先运行 setup 命令注册公钥');
+          return;
+        } else if (authError.message.includes('服务器已重置密钥') || 
+                  authError.message.includes('联系教师重置您的公钥')) {
+          console.log('您的密钥状态异常，可能是因为：');
+          console.log('1. 教师已经重置了您的密钥');
+          console.log('2. 您更换了环境（如切换电脑或虚拟机）');
+          console.log('\n请联系教师重置您的密钥状态，然后重新运行 setup 命令');
+          return;
         } else if (authError.message.includes('未找到密钥对') || 
-                  authError.message.includes('私钥文件不存在')) {
-          console.log('密钥不存在或已损坏，正在重新生成...');
+                  authError.message.includes('密钥文件不存在')) {
+          console.log('密钥不存在或已损坏，需要重新生成...');
           await ReporterCore.generateAndSaveKeyPair(config);
-          authData = await ReporterCore.authenticate(config);
+          console.log('新密钥已生成，请运行 setup 命令注册公钥');
+          return;
         } else {
           throw authError;
         }
@@ -125,7 +141,7 @@ export const Commands = {
       const reportData = await ReporterCore.createReportData(config, authData);
       
       // 发送报告
-      console.log('发送API状态报告...');
+      console.log('准备发送API状态报告...');
       const response = await ReporterCore.sendReport(config, reportData);
       
       console.log('报告成功!', response.message || '');
@@ -141,22 +157,31 @@ export const Commands = {
       if (error.response?.data?.requiresAuth) {
         console.error('认证失败:', error.response.data.error);
         
-        // 重新配置认证信息
-        const { reconfigure } = await inquirer.prompt([
-          {
-            type: 'confirm',
-            name: 'reconfigure',
-            message: '是否重新生成密钥?',
-            default: true
+        // 根据错误类型，给出更明确的指导
+        if (error.response.data.error.includes('未找到公钥') || 
+            error.response.data.error.includes('没有注册公钥')) {
+          console.log('请先运行 setup 命令注册公钥');
+        } else if (error.response.data.error.includes('签名验证失败') ||
+                  error.response.data.error.includes('无效签名')) {
+          console.log('如果您更换了环境，请联系教师重置您的密钥状态，然后重新运行 setup 命令');
+        } else {
+          // 一般认证错误，询问是否重新生成密钥
+          const { reconfigure } = await inquirer.prompt([
+            {
+              type: 'confirm',
+              name: 'reconfigure',
+              message: '是否重新生成密钥?',
+              default: true
+            }
+          ]);
+          
+          if (reconfigure) {
+            const config = await ConfigManager.loadConfig();
+            config.keyPair = null;
+            await ConfigManager.saveConfig(config);
+            await ReporterCore.generateAndSaveKeyPair(config);
+            console.log('密钥已重新生成，请运行 setup 命令重新注册公钥');
           }
-        ]);
-        
-        if (reconfigure) {
-          const config = await ConfigManager.loadConfig();
-          config.keyPair = null;
-          await ConfigManager.saveConfig(config);
-          await ReporterCore.generateAndSaveKeyPair(config);
-          return await Commands.reportOnce();
         }
       } else {
         console.error('报告失败:', error.response?.data?.error || error.message);

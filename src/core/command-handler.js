@@ -31,8 +31,16 @@ export const CommandHandler = {
         return await this.runTests();
       }
       
-      if (command === 'CLEAN_DATA') {
-        return await this.cleanData();
+      // 处理重置密钥命令
+      if (command === 'RESET_KEYS') {
+        console.log('执行重置密钥命令...');
+        // 删除本地密钥配置
+        const config = await ConfigManager.loadConfig();
+        config.keyPair = null;
+        await ConfigManager.saveConfig(config);
+        await ConfigManager.deleteKeyFiles();
+        console.log('密钥已重置，将在下次报告时重新生成');
+        return true;
       }
       
       // 未知命令
