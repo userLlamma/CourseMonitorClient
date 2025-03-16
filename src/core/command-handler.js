@@ -30,6 +30,10 @@ export const CommandHandler = {
       if (command === 'RUN_TEST') {
         return await this.runTests();
       }
+
+      if (command === 'CLEAN_DATA') {
+        return await this.cleanData();
+      }
       
       // 处理重置密钥命令
       if (command === 'RESET_KEYS') {

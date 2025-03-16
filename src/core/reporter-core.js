@@ -334,7 +334,9 @@ export const ReporterCore = {
                 data: {
                     todoCount,
                     todos,
-                    testResults
+                    testResults,
+                    testsPassed: testResults ? testResults.filter(test => test.passed).length : 0,
+                    testsTotal: testResults ? testResults.length : 0
                 }
             };
             
@@ -353,7 +355,7 @@ export const ReporterCore = {
      */
     async sendReport(config, reportData) {
         try {
-            console.log('准备发送API状态报告...');
+            console.log('发送API状态报告...');
             
             // 设置请求头
             const headers = {
