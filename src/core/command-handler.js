@@ -70,6 +70,36 @@ export const CommandHandler = {
       // 运行测试
       const results = await StudentAPI.runCustomTests();
       
+      // 将测试结果转换为前端期望的格式
+      const formattedTests = results.tests.map(test => {
+        return {
+          name: test.name,
+          endpoint: test.name.split(' ')[1] || "未知端点", // 从测试名称中提取端点
+          method: test.name.split(' ')[0] || "未知方法", // 从测试名称中提取方法
+          passed: test.passed,
+          response: test.resultData || {}, // 测试的响应数据
+          error: test.passed ? undefined : test.message,
+          score: {
+            value: test.passed ? 10 : 0, // 简单的评分逻辑
+            maxValue: 10,
+            comments: test.passed ? "通过测试" : test.message
+          }
+        };
+      });
+      
+      // 创建符合前端要求的完整测试结果结构
+      const frontendResults = {
+        score: results.score,
+        maxPossibleScore: results.total * 10, // 每个测试10分
+        totalPassed: results.passed,
+        totalFailed: results.failed,
+        timestamp: new Date().toISOString(),
+        tests: formattedTests
+      };
+      
+      // 将格式化后的结果保存到学生API对象中，用于下次报告
+      StudentAPI.lastTestResults = frontendResults;
+      
       console.log(`测试完成: ${results.passed}/${results.total} 通过`);
       return true;
     } catch (error) {

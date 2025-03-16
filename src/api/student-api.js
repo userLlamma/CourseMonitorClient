@@ -34,19 +34,24 @@ class TestResults {
     this.tests.push({
       name,
       passed,
-      message
+      message,
+      ...testData
     });
   }
 
   // 获取结果摘要
   getSummary() {
+    const passed = this.passed || 0;
+    const total = this.total || 0;
+    const failed = this.failed || 0;
+    
     return {
-      passed: this.passed,
-      failed: this.failed,
-      total: this.total,
+      passed,
+      failed,
+      total,
       tests: this.tests,
-      passRate: this.total ? (this.passed / this.total * 100).toFixed(2) + '%' : '0%',
-      score: this.total ? Math.round((this.passed / this.total) * 100) : 0
+      passRate: total ? (passed / total * 100).toFixed(2) + '%' : '0%',
+      score: total ? Math.round((passed / total) * 100) : 0
     };
   }
 }
@@ -308,10 +313,27 @@ export const StudentAPI = {
         try {
           // 使用bind确保this指向StudentAPI
           const result = await test.run.bind(this)();
-          results.addResult(test.name, true, result.message);
+          
+          // 存储额外的测试数据以供前端使用
+          const testData = {
+            name: test.name,
+            passed: true,
+            message: result.message,
+            resultData: result.data || {} // 保存测试的响应数据
+          };
+          
+          results.addResult(test.name, true, result.message, testData);
           console.log(`✅ 通过: ${result.message}`);
         } catch (error) {
-          results.addResult(test.name, false, error.message);
+          // 存储失败的测试详情
+          const testData = {
+            name: test.name,
+            passed: false,
+            message: error.message,
+            resultData: null
+          };
+          
+          results.addResult(test.name, false, error.message, testData);
           console.log(`❌ 失败: ${error.message}`);
         }
       }
@@ -320,6 +342,9 @@ export const StudentAPI = {
     // 打印测试结果摘要
     const summary = results.getSummary();
     console.log(`\n测试完成: ${summary.passed}/${summary.total} 通过 (${summary.passRate})`);
+    
+    // 保存最新的测试结果
+    this.lastTestResults = summary;
     
     return summary;
   },

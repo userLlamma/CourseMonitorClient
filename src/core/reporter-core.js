@@ -316,6 +316,15 @@ export const ReporterCore = {
                 }
                 
                 // 这里不立即运行测试，等待服务器命令
+                // 但是我们可以为前端准备结果结构
+                testResults = {
+                  score: 0,
+                  maxPossibleScore: 0,
+                  totalPassed: 0,
+                  totalFailed: 0,
+                  timestamp: new Date().toISOString(),
+                  tests: []
+              };
             } catch (error) {
                 console.warn('获取API测试数据失败:', error.message);
             }
@@ -334,9 +343,7 @@ export const ReporterCore = {
                 data: {
                     todoCount,
                     todos,
-                    testResults,
-                    testsPassed: testResults ? testResults.filter(test => test.passed).length : 0,
-                    testsTotal: testResults ? testResults.length : 0
+                    testResults
                 }
             };
             
