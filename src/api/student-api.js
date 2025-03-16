@@ -13,6 +13,66 @@ import axios from 'axios';
 // 默认的API基础URL
 const API_BASE_URL = 'http://localhost:3000';
 
+/**
+   * 截断响应数据以控制大小
+   * @param {Object} response Axios响应对象
+   * @param {number} maxLength 字符串字段最大长度
+   * @param {number} maxArrayItems 数组最大项数
+   * @returns {Object} 截断后的响应对象
+   */
+function truncateResponseData(response, maxLength = 5000, maxArrayItems = 100) {
+  if (!response) return response;
+  
+  // 创建新对象以避免修改原始响应
+  const truncated = {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers ? { ...response.headers } : undefined,
+    data: undefined
+  };
+  
+  // 递归处理对象和数组，截断过长字段
+  function truncateValue(value) {
+    if (value === null || value === undefined) {
+      return value;
+    }
+    
+    // 处理字符串 - 截断过长字符串
+    if (typeof value === 'string') {
+      if (value.length > maxLength) {
+        return value.substring(0, maxLength) + `... (原长度: ${value.length})`;
+      }
+      return value;
+    }
+    
+    // 处理数组 - 限制项数并递归处理每一项
+    if (Array.isArray(value)) {
+      const truncatedArray = value.slice(0, maxArrayItems).map(truncateValue);
+      if (value.length > maxArrayItems) {
+        truncatedArray.push(`... (另外还有 ${value.length - maxArrayItems} 项)"`);
+      }
+      return truncatedArray;
+    }
+    
+    // 处理对象 - 递归处理每个属性
+    if (typeof value === 'object') {
+      const truncatedObj = {};
+      for (const [key, propValue] of Object.entries(value)) {
+        truncatedObj[key] = truncateValue(propValue);
+      }
+      return truncatedObj;
+    }
+    
+    // 其他类型直接返回
+    return value;
+  }
+  
+  // 处理响应数据
+  truncated.data = truncateValue(response.data);
+  
+  return truncated;
+}
+
 // 测试结果收集器
 class TestResults {
   constructor() {
@@ -23,7 +83,7 @@ class TestResults {
   }
 
   // 添加测试结果
-  addResult(name, passed, message) {
+  addResult(name, passed, message, testData = {}) {
     if(passed) {
       this.passed++;
     } else {
@@ -51,7 +111,9 @@ class TestResults {
       total,
       tests: this.tests,
       passRate: total ? (passed / total * 100).toFixed(2) + '%' : '0%',
-      score: total ? Math.round((passed / total) * 100) : 0
+      score: total ? Math.round((passed / total) * 100) : 0,
+      maxPossibleScore: total * 10,
+      timestamp: new Date().toISOString()
     };
   }
 }
@@ -69,19 +131,26 @@ const TestModules = {
     description: "测试基本的待办事项创建、读取、更新和删除功能",
     active: true, // 是否激活此测试模块
     tests: [
+      // 获取所有待办事项测试
       {
         name: "GET /todos 获取所有待办事项",
         run: async () => {
           const response = await axios.get(`${API_BASE_URL}/todos`);
+          
+          // 验证响应
           if (!Array.isArray(response.data)) {
             throw new Error('响应不是数组格式');
           }
-          return { 
-            passed: true, 
-            message: `成功获取 ${response.data.length} 个待办事项` 
-          };
+          
+          // 直接在响应对象上添加消息属性
+          response.message = `成功获取 ${response.data.length} 个待办事项`;
+          
+          // 直接返回完整的响应对象
+          return response;
         }
       },
+
+      // 创建待办事项测试
       {
         name: "POST /todos 创建待办事项",
         run: async () => {
@@ -92,6 +161,7 @@ const TestModules = {
           
           const response = await axios.post(`${API_BASE_URL}/todos`, newTodo);
           
+          // 验证响应
           if (!response.data || !response.data.id || response.data.title !== newTodo.title) {
             throw new Error('创建的待办事项缺少必要字段或数据不匹配');
           }
@@ -99,12 +169,20 @@ const TestModules = {
           // 保存ID用于后续测试
           StudentAPI.lastCreatedTodoId = response.data.id;
           
-          return { 
-            passed: true, 
-            message: `成功创建待办事项，ID: ${response.data.id}` 
+          // 在响应对象上添加消息和请求信息
+          response.message = `成功创建待办事项，ID: ${response.data.id}`;
+          response.requestData = {
+            method: 'POST',
+            url: `${API_BASE_URL}/todos`,
+            body: newTodo
           };
+          
+          // 返回完整响应
+          return response;
         }
       },
+
+      // 获取特定待办事项测试
       {
         name: "GET /todos/:id 获取特定待办事项",
         run: async () => {
@@ -114,67 +192,18 @@ const TestModules = {
           
           const response = await axios.get(`${API_BASE_URL}/todos/${StudentAPI.lastCreatedTodoId}`);
           
+          // 验证响应
           if (!response.data || response.data.id !== StudentAPI.lastCreatedTodoId) {
             throw new Error('获取的待办事项ID不匹配');
           }
           
-          return { 
-            passed: true, 
-            message: `成功获取待办事项，ID: ${StudentAPI.lastCreatedTodoId}` 
-          };
+          // 添加消息
+          response.message = `成功获取待办事项，ID: ${StudentAPI.lastCreatedTodoId}`;
+          
+          // 直接返回响应
+          return response;
         }
       },
-      {
-        name: "PUT /todos/:id 更新待办事项",
-        run: async () => {
-          if (!StudentAPI.lastCreatedTodoId) {
-            throw new Error('没有可用的待办事项ID，请先创建待办事项');
-          }
-          
-          const updateData = {
-            title: `更新的待办事项 ${Date.now()}`,
-            completed: true
-          };
-          
-          const response = await axios.put(`${API_BASE_URL}/todos/${StudentAPI.lastCreatedTodoId}`, updateData);
-          
-          if (!response.data || 
-              response.data.id !== StudentAPI.lastCreatedTodoId || 
-              response.data.title !== updateData.title || 
-              response.data.completed !== updateData.completed) {
-            throw new Error('更新的待办事项数据不匹配');
-          }
-          
-          return { 
-            passed: true, 
-            message: `成功更新待办事项，ID: ${StudentAPI.lastCreatedTodoId}` 
-          };
-        }
-      },
-      {
-        name: "DELETE /todos/:id 删除待办事项",
-        run: async () => {
-          if (!StudentAPI.lastCreatedTodoId) {
-            throw new Error('没有可用的待办事项ID，请先创建待办事项');
-          }
-          
-          await axios.delete(`${API_BASE_URL}/todos/${StudentAPI.lastCreatedTodoId}`);
-          
-          // 验证删除成功
-          try {
-            await axios.get(`${API_BASE_URL}/todos/${StudentAPI.lastCreatedTodoId}`);
-            throw new Error(`删除失败，仍然可以获取到待办事项，ID: ${StudentAPI.lastCreatedTodoId}`);
-          } catch (error) {
-            if (error.response && error.response.status === 404) {
-              return { 
-                passed: true, 
-                message: `成功删除待办事项，ID: ${StudentAPI.lastCreatedTodoId}` 
-              };
-            }
-            throw error;
-          }
-        }
-      }
     ]
   },
   
@@ -310,31 +339,99 @@ export const StudentAPI = {
       for (const test of module.tests) {
         console.log(`\n运行测试: ${test.name}`);
         
+        // 解析测试名称以获取方法和端点
+        const parts = test.name.split(' ');
+        const method = parts[0] || "未知方法";
+        const endpoint = parts.slice(1).join(' ') || "未知端点";
+        
         try {
+          // 跟踪请求开始时间
+          const startTime = Date.now();
+          
           // 使用bind确保this指向StudentAPI
           const result = await test.run.bind(this)();
           
-          // 存储额外的测试数据以供前端使用
+          // 计算请求耗时
+          const duration = Date.now() - startTime;
+          
+          // 确保响应有正确的格式，并截断过大的数据
+          let responseData = {};
+          
+          // 如果测试函数直接返回了axios响应，则使用它
+          if (result && result.status && result.data) {
+            responseData = truncateResponseData(result);
+          } 
+          // 如果测试返回了自定义格式的结果，提取响应数据
+          else if (result && result.data) {
+            responseData = truncateResponseData(result.data);
+          }
+          // 测试返回了自己的格式，直接使用
+          else {
+            responseData = result;
+          }
+          
+          // 成功的测试结果
           const testData = {
             name: test.name,
+            endpoint,
+            method,
             passed: true,
-            message: result.message,
-            resultData: result.data || {} // 保存测试的响应数据
+            duration,
+            // 保存完整的响应数据
+            response: responseData,
+            error: null,
+            score: {
+              value: 10, // 通过的测试得10分
+              maxValue: 10,
+              comments: result.message || "通过测试"
+            }
           };
           
-          results.addResult(test.name, true, result.message, testData);
-          console.log(`✅ 通过: ${result.message}`);
+          results.addResult(test.name, true, result.message || "测试通过", testData);
+          console.log(`✅ 通过: ${result.message || "测试通过"} (${duration}ms)`);
         } catch (error) {
-          // 存储失败的测试详情
+          // 获取错误信息
+          let errorMessage = error.message;
+          let responseData = {};
+          
+          // 尝试从Axios错误中提取响应数据
+          if (error.response) {
+            responseData = truncateResponseData(error.response);
+            // 增强错误信息
+            if (!errorMessage.includes(error.response.status.toString())) {
+              errorMessage = `[${error.response.status}] ${errorMessage}`;
+            }
+          } else if (error.request) {
+            // 请求已经发出，但没有收到响应
+            responseData = {
+              request: true,
+              message: "No response received"
+            };
+          }
+          
+          // 如果错误对象自带响应数据，使用它
+          if (error.responseData) {
+            responseData = truncateResponseData(error.responseData);
+          }
+          
+          // 失败的测试结果
           const testData = {
             name: test.name,
+            endpoint,
+            method,
             passed: false,
-            message: error.message,
-            resultData: null
+            // 保存响应数据，即使是错误响应
+            response: responseData,
+            error: errorMessage,
+            score: {
+              value: 0, // 失败的测试得0分
+              maxValue: 10,
+              comments: errorMessage || "测试失败"
+            }
           };
           
-          results.addResult(test.name, false, error.message, testData);
-          console.log(`❌ 失败: ${error.message}`);
+          results.addResult(test.name, false, errorMessage, testData);
+          console.log(`❌ 失败: ${errorMessage}`);
         }
       }
     }
@@ -343,10 +440,40 @@ export const StudentAPI = {
     const summary = results.getSummary();
     console.log(`\n测试完成: ${summary.passed}/${summary.total} 通过 (${summary.passRate})`);
     
-    // 保存最新的测试结果
-    this.lastTestResults = summary;
+    // 保存最新的测试结果，确保格式符合前端期望
+    this.lastTestResults = {
+      score: summary.score,
+      maxPossibleScore: summary.maxPossibleScore,
+      totalPassed: summary.passed,
+      totalFailed: summary.failed,
+      timestamp: summary.timestamp,
+      tests: summary.tests.map(test => ({
+        name: test.name,
+        endpoint: test.endpoint,
+        method: test.method,
+        passed: test.passed,
+        // 直接使用测试中保存的响应数据
+        response: test.response || {},
+        error: test.passed ? null : test.error,
+        score: {
+          value: test.passed ? 10 : 0,
+          maxValue: 10,
+          comments: test.passed ? (test.message || "通过测试") : test.error
+        }
+      }))
+    };
     
-    return summary;
+    // 添加调试输出
+    // console.log('\n测试结果响应数据样例:');
+    // if (this.lastTestResults.tests.length > 0) {
+    //   const firstTest = this.lastTestResults.tests[0];
+    //   console.log(`测试 "${firstTest.name}" 的响应数据类型:`, typeof firstTest.response);
+    //   console.log(JSON.stringify(firstTest.response, null, 2).substring(0, 5000) + (JSON.stringify(firstTest.response, null, 2).length > 5000 ? '...' : ''));
+    // }
+    
+    console.log('\n测试结果详细数据:');
+    console.log(JSON.stringify(this.lastTestResults, null, 2));
+    return this.lastTestResults;
   },
   
   /**

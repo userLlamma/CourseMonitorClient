@@ -293,68 +293,43 @@ export const ReporterCore = {
           // 获取硬件信息
           const hardwareInfo = await HardwareInfo.collect();
           
-          // 获取待办事项数据
+          // 获取待办事项数据和测试结果
           let todos = [];
           let todoCount = 0;
           let testResults = null;
           
-          // 尝试从学生API获取数据
           try {
-              console.log('获取API测试数据...');
-              
-              // 动态导入学生API
+              // 动态导入学生API和CommandHandler
               const { default: StudentAPI } = await import('../api/student-api.js');
+              const { default: CommandHandler } = await import('../core/command-handler.js');
               
               // 获取待办事项
               try {
                   const response = await axios.get(`${StudentAPI.API_BASE_URL}/todos`);
                   todos = Array.isArray(response.data) ? response.data : [];
-                  todoCount = todos.length;
-                  console.log(`找到 ${todoCount} 个待办事项`);
+                  todoCount = todos.length || 0;
               } catch (error) {
                   console.warn('获取待办事项失败:', error.message);
+                  todoCount = 0;
               }
               
               // 主动执行测试
               console.log('主动执行API测试...');
-              try {
-                  // 导入CommandHandler以便执行测试
-                  const { default: CommandHandler } = await import('../core/command-handler.js');
-                  
-                  // 执行测试
-                  await CommandHandler.runTests();
-                  
-                  // 获取测试结果
-                  if (StudentAPI.lastTestResults) {
-                      testResults = StudentAPI.lastTestResults;
-                      console.log(`测试完成: ${testResults.totalPassed}/${testResults.totalPassed + testResults.totalFailed} 通过`);
-                  } else {
-                      console.warn('测试执行完成，但未找到测试结果');
-                      testResults = {
-                          score: 0,
-                          maxPossibleScore: 0,
-                          totalPassed: 0,
-                          totalFailed: 0,
-                          timestamp: new Date().toISOString(),
-                          tests: []
-                      };
-                  }
-              } catch (testError) {
-                  console.error('执行测试失败:', testError.message);
-                  // 即使测试失败，也提供一个有效的测试结果结构
-                  testResults = {
-                      score: 0,
-                      maxPossibleScore: 0,
-                      totalPassed: 0,
-                      totalFailed: 0,
-                      timestamp: new Date().toISOString(),
-                      tests: [],
-                      error: testError.message
-                  };
-              }
+              await CommandHandler.runTests();
+              
+              // 获取测试结果，如果没有则创建空结构
+              testResults = StudentAPI.lastTestResults || {
+                  score: 0,
+                  maxPossibleScore: 0,
+                  totalPassed: 0,
+                  totalFailed: 0,
+                  timestamp: new Date().toISOString(),
+                  tests: []
+              };
+              
           } catch (error) {
-              console.warn('获取API测试数据失败:', error.message);
-              // 即使出错，也确保有一个有效的测试结果结构
+              console.warn('API测试失败:', error.message);
+              // 创建空的测试结果结构
               testResults = {
                   score: 0,
                   maxPossibleScore: 0,
@@ -371,7 +346,7 @@ export const ReporterCore = {
               name: config.name || os.userInfo().username,
               apiVersion: config.apiVersion || '1.0.0',
               ipAddress: await this.getIPAddress(),
-              port: 3000, // 假设API在3000端口
+              port: 3000,
               timestamp: new Date().toISOString(),
               signature: authData.signature,
               challenge: authData.challenge, 
@@ -382,22 +357,6 @@ export const ReporterCore = {
                   testResults
               }
           };
-          
-          // 添加安全检查，确保报告中没有NaN值
-          const sanitizeReportData = (obj) => {
-              if (!obj) return;
-              Object.keys(obj).forEach(key => {
-                  if (typeof obj[key] === 'number' && Number.isNaN(obj[key])) {
-                      console.log(`警告: 字段 ${key} 是 NaN，自动修复为 0`);
-                      obj[key] = 0;
-                  } else if (typeof obj[key] === 'object' && obj[key] !== null) {
-                      sanitizeReportData(obj[key]);
-                  }
-              });
-          };
-          
-          // 确保报告数据没有NaN值
-          sanitizeReportData(reportData);
           
           return reportData;
       } catch (error) {
